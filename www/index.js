@@ -1,6 +1,6 @@
 import { Universe } from "wasm-game-of-life";
 
-const CELL_SIZE = 5; // px
+const CELL_SIZE = 13; // px
 const GRID_COLOR = "#CCCCCC";
 const DEAD_COLOR = "#000000";
 const ALIVE_COLOR = "#FFFFFF";
