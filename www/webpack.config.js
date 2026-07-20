@@ -6,7 +6,7 @@ module.exports = (env, argv) => ({
   output: {
     path: path.resolve(__dirname, "dist"),
     filename: "bootstrap.js",
-    // publicPath: "/wasm-game-of-life/",
+    publicPath: "/wasm-game-of-life/",
   },
   mode: argv.mode === "production" ? "production" : "development",
   experiments: {
