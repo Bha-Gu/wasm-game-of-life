@@ -25,7 +25,7 @@ let ticksPerFrame = Number(ticksRange.value);
 
 ticksRange.addEventListener("input", (event) => {
   ticksPerFrame = Number(event.target.value);
-  ticksValue.textContent = `${ticksPerFrame} tick${ticksPerFrame > 1 ? "s" : ""}/frame`;
+  ticksValue.textContent = `${ticksPerFrame} tick${ticksPerFrame > 1 ? "s" : ""}/second`;
 });
 let animationId = null;
 
@@ -60,7 +60,7 @@ const getIndex = (row, column) => {
 
 const drawCells = () => {
   const cellsPtr = universe.cells();
-  const cells = new Uint8Array(memory.buffer, cellsPtr, width * height);
+  const cells = new Uint8Array(memory.buffer, cellsPtr, width * height / 8);
 
   ctx.beginPath();
 
