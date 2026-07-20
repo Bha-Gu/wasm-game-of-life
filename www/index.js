@@ -1,14 +1,14 @@
 import { Universe } from "wasm-game-of-life";
 
-const CELL_SIZE = 13; // px
+const CELL_SIZE = 10; // px
 const GRID_COLOR = "#CCCCCC";
 const DEAD_COLOR = "#000000";
 const ALIVE_COLOR = "#FFFFFF";
 
 // Construct the universe, and get its width and height.
-const universe = Universe.new();
-const width = universe.width();
-const height = universe.height();
+let universe = Universe.new();
+let width = universe.width();
+let height = universe.height();
 
 // Give the canvas room for all of our cells and a 1px border
 // around each of them.
@@ -18,17 +18,19 @@ canvas.width = (CELL_SIZE + 1) * width + 1;
 
 const ctx = canvas.getContext("2d");
 
-const FPS = 10; // ticks per second
+const ticksRange = document.getElementById("ticks-range");
+const ticksValue = document.getElementById("ticks-value");
 
-const renderLoop = () => {
-  setTimeout(() => {
-    universe.tick();
-    console.log("Tick");
-    drawGrid();
-    drawCells();
-    requestAnimationFrame(renderLoop);
-  }, 1000 / FPS);
-};
+let ticksPerFrame = Number(ticksRange.value);
+
+ticksRange.addEventListener("input", (event) => {
+  ticksPerFrame = Number(event.target.value);
+  ticksValue.textContent = `${ticksPerFrame} tick${ticksPerFrame > 1 ? "s" : ""}/frame`;
+});
+let animationId = null;
+
+let pausedStatus = true;
+
 const drawGrid = () => {
   ctx.beginPath();
   ctx.strokeStyle = GRID_COLOR;
@@ -62,12 +64,34 @@ const drawCells = () => {
 
   ctx.beginPath();
 
+  ctx.fillStyle = ALIVE_COLOR;
   for (let row = 0; row < height; row++) {
     for (let col = 0; col < width; col++) {
       const idx = (getIndex(row, col) / 8) | 0;
       const bit = getIndex(row, col) % 8;
-      ctx.fillStyle =
-        (cells[idx] & (2 ** bit)) === 0 ? DEAD_COLOR : ALIVE_COLOR;
+
+      if ((cells[idx] & (2 ** bit)) === 0) {
+        continue;
+      }
+
+      ctx.fillRect(
+        col * (CELL_SIZE + 1) + 1,
+        row * (CELL_SIZE + 1) + 1,
+        CELL_SIZE,
+        CELL_SIZE,
+      );
+    }
+  }
+
+  ctx.fillStyle = DEAD_COLOR;
+  for (let row = 0; row < height; row++) {
+    for (let col = 0; col < width; col++) {
+      const idx = (getIndex(row, col) / 8) | 0;
+      const bit = getIndex(row, col) % 8;
+
+      if ((cells[idx] & (2 ** bit)) != 0) {
+        continue;
+      }
 
       ctx.fillRect(
         col * (CELL_SIZE + 1) + 1,
@@ -80,6 +104,127 @@ const drawCells = () => {
 
   ctx.stroke();
 };
+
+const fps = new (class {
+  constructor() {
+    this.fps = document.getElementById("fps");
+    this.frames = [];
+    this.lastFrameTimeStamp = performance.now();
+  }
+
+  render() {
+    // Convert the delta time since the last frame render into a measure
+    // of frames per second.
+    const now = performance.now();
+    const delta = now - this.lastFrameTimeStamp;
+    this.lastFrameTimeStamp = now;
+    const fps = (1 / delta) * 1000;
+
+    // Save only the latest 100 timings.
+    this.frames.push(fps);
+    if (this.frames.length > 100) {
+      this.frames.shift();
+    }
+
+    // Find the max, min, and mean of our 100 latest timings.
+    let min = Infinity;
+    let max = -Infinity;
+    let sum = 0;
+    for (let i = 0; i < this.frames.length; i++) {
+      sum += this.frames[i];
+      min = Math.min(this.frames[i], min);
+      max = Math.max(this.frames[i], max);
+    }
+    let mean = sum / this.frames.length;
+
+    // Render the statistics.
+    this.fps.textContent = `
+Frames per Second:
+         latest = ${Math.round(fps)}
+avg of last 100 = ${Math.round(mean)}
+min of last 100 = ${Math.round(min)}
+max of last 100 = ${Math.round(max)}
+`.trim();
+  }
+})();
+
+const renderLoop = () => {
+  if (pausedStatus) {
+  } else {
+    setTimeout(() => {
+      fps.render();
+      // debugger;
+      universe.tick();
+      drawGrid();
+      drawCells();
+      animationId = requestAnimationFrame(renderLoop);
+    }, 1000 / ticksPerFrame);
+  }
+};
+
+const playPauseButton = document.getElementById("play-pause");
+
+const randomizeButton = document.getElementById("random");
+
+const clearButton = document.getElementById("clear");
+
+const play = () => {
+  playPauseButton.textContent = "⏸ Pause";
+  pausedStatus = false;
+  animationId = requestAnimationFrame(renderLoop);
+};
+
+const pause = () => {
+  playPauseButton.textContent = "▶ Play";
+  pausedStatus = true;
+  cancelAnimationFrame(animationId);
+  animationId = null;
+};
+
+playPauseButton.addEventListener("click", (event) => {
+  if (pausedStatus) {
+    play();
+  } else {
+    pause();
+  }
+});
+
+randomizeButton.addEventListener("click", (event) => {
+  universe = Universe.new();
+  width = universe.width();
+  height = universe.height();
+  drawGrid();
+  drawCells();
+});
+
+clearButton.addEventListener("click", (event) => {
+  universe = Universe.new_empty();
+  width = universe.width();
+  height = universe.height();
+  drawGrid();
+  drawCells();
+});
+
+// This used to be `requestAnimationFrame(renderLoop)`.
+// play();
+
 drawGrid();
 drawCells();
-requestAnimationFrame(renderLoop);
+// requestAnimationFrame(renderLoop);
+canvas.addEventListener("click", (event) => {
+  const boundingRect = canvas.getBoundingClientRect();
+
+  const scaleX = canvas.width / boundingRect.width;
+  const scaleY = canvas.height / boundingRect.height;
+
+  const canvasLeft = (event.clientX - boundingRect.left) * scaleX;
+  const canvasTop = (event.clientY - boundingRect.top) * scaleY;
+
+  const row = Math.min(Math.floor(canvasTop / (CELL_SIZE + 1)), height - 1);
+  const col = Math.min(Math.floor(canvasLeft / (CELL_SIZE + 1)), width - 1);
+
+  universe.toggle_cell(row, col);
+
+  drawGrid();
+  drawCells();
+});
