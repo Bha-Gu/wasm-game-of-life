@@ -1,6 +1,6 @@
+#![no_std]
 extern crate wee_alloc;
 
-// Use `wee_alloc` as the global allocator.
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 mod utils;
@@ -11,172 +11,217 @@ use wasm_bindgen::prelude::*;
 
 extern crate web_sys;
 
-use web_sys::console;
+// use web_sys::console;
 
-pub struct Timer<'a> {
-    name: &'a str,
-}
+const WIDTH: u32 = 128;
+const HEIGHT: u32 = 128;
+const SIZE: u32 = WIDTH * HEIGHT;
 
-impl<'a> Timer<'a> {
-    pub fn new(name: &'a str) -> Timer<'a> {
-        console::time_with_label(name);
-        Timer { name }
-    }
-}
+// pub struct Timer<'a> {
+//     name: &'a str,
+// }
 
-impl<'a> Drop for Timer<'a> {
-    fn drop(&mut self) {
-        console::time_end_with_label(self.name);
-    }
-} // A macro to provide `println!(..)`-style syntax for `console.log` logging.
-macro_rules! log {
-    ( $( $t:tt )* ) => {
-        web_sys::console::log_1(&format!( $( $t )* ).into());
-    }
-}
+// impl<'a> Timer<'a> {
+//     pub fn new(name: &'a str) -> Timer<'a> {
+//         console::time_with_label(name);
+//         Timer { name }
+//     }
+// }
 
-extern crate fixedbitset;
-use fixedbitset::FixedBitSet;
-
-#[wasm_bindgen]
-#[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Cell {
-    Dead = 0,
-    Alive = 1,
-}
+// impl<'a> Drop for Timer<'a> {
+//     fn drop(&mut self) {
+//         console::time_end_with_label(self.name);
+//     }
+// } // A macro to provide `println!(..)`-style syntax for `console.log` logging.
+// macro_rules! log {
+//     ( $( $t:tt )* ) => {
+//         web_sys::console::log_1(&format!( $( $t )* ).into());
+//     }
+// }
 
 #[wasm_bindgen]
 pub struct Universe {
     width: u32,
     height: u32,
-    cells: FixedBitSet,
+    cells: [u8; SIZE as usize / 8],
+    cells_tmp: [u8; SIZE as usize / 8],
 }
 
-impl Default for Universe {
-    fn default() -> Self {
-        utils::set_panic_hook();
-        Self {
-            width: 64,
-            height: 64,
-            cells: FixedBitSet::with_capacity(4096),
-        }
-    }
-}
+static mut UNIV: Universe = Universe {
+    width: WIDTH,
+    height: HEIGHT,
+    cells: [0; SIZE as usize / 8],
+    cells_tmp: [0; SIZE as usize / 8],
+};
 
 #[allow(clippy::missing_const_for_fn)]
 #[wasm_bindgen]
 impl Universe {
     #[must_use]
-    pub fn new_empty() -> Self {
-        Self::default()
+    pub unsafe fn new_empty() {
+        Self::reset();
     }
 
     #[must_use]
-    pub fn new() -> Self {
-        utils::set_panic_hook();
-        let width: u32 = 64;
-        let height: u32 = 64;
+    pub unsafe fn new() {
+        // utils::set_panic_hook();
+        let mut cells = [0; SIZE as usize / 8];
+        for i in 0..SIZE {
+            let idx = i / 8;
+            let bit = i % 8;
 
-        let size = (width * height) as usize;
-        let mut cells = FixedBitSet::with_capacity(size);
-        for i in 0..size {
-            cells.set(i, js_sys::Math::random() < 0.5);
-        }
-        Self {
-            width,
-            height,
-            cells,
-        }
-    }
-
-    pub fn tick(&mut self) {
-        let _timer = Timer::new("Universe::tick");
-        let mut next = self.cells.clone();
-
-        for row in 0..self.height {
-            for col in 0..self.width {
-                let idx = self.get_index(row, col);
-                let cell = self.cells[idx];
-                let live_neighbors = self.live_neighbor_count(row, col);
-
-                next.set(
-                    idx,
-                    match (cell, live_neighbors) {
-                        (true, x) if x < 2 => false,
-                        (true, 2 | 3) | (false, 3) => true,
-                        (true, x) if x > 3 => false,
-                        (otherwise, _) => otherwise,
-                    },
-                );
+            cells[idx as usize] = match js_sys::Math::random() < 0.5 {
+                true => cells[idx as usize] | 2u8.pow(bit),
+                false => cells[idx as usize] & (u8::MAX - 2u8.pow(bit)),
             }
         }
+        UNIV.cells = cells.clone();
+        UNIV.cells_tmp = cells;
+    }
 
-        self.cells = next;
+    pub unsafe fn tick() {
+        // let _timer = Timer::new("Universe::tick");
+        UNIV.cells_tmp = UNIV.cells.clone();
+        // log!("{:?}", UNIV.cells);
+        for row in 0..UNIV.height {
+            for col in 0..UNIV.width {
+                let cell = Self::get_cell(row, col);
+                let live_neighbors = Self::live_neighbor_count(row, col);
+
+                match (cell, live_neighbors) {
+                    (true, x) if (x < 2) | (x > 3) => Self::unset_tmp_cell(row, col),
+                    (false, 3) | (true, _) => Self::set_tmp_cell(row, col),
+                    (false, _) => Self::unset_tmp_cell(row, col),
+                };
+            }
+        }
+        // log!("t{:?}", UNIV.cells_tmp);
+        UNIV.cells = UNIV.cells_tmp.clone();
+        // log!("a{:?}", UNIV.cells);
     }
     #[must_use]
-    pub fn width(&self) -> u32 {
-        self.width
+    pub unsafe fn width() -> u32 {
+        UNIV.width
     }
     #[must_use]
-    pub fn height(&self) -> u32 {
-        self.height
+    pub unsafe fn height() -> u32 {
+        UNIV.height
     }
 
-    pub fn set_width(&mut self, width: u32) {
-        self.width = width;
-        self.reset();
+    #[must_use]
+    pub unsafe fn cells() -> *const u8 {
+        UNIV.cells.as_slice().as_ptr()
     }
 
-    pub fn set_height(&mut self, height: u32) {
-        self.height = height;
-        self.reset();
+    pub unsafe fn set_cell(row: u32, col: u32) {
+        let i = Self::get_index(row, col);
+        let idx = i / 8;
+        let bit = i % 8;
+
+        UNIV.cells[idx as usize] = UNIV.cells[idx as usize] | 2u8.pow(bit as u32);
+        UNIV.cells_tmp[idx as usize] = UNIV.cells[idx as usize] | 2u8.pow(bit as u32);
+    }
+
+    pub unsafe fn unset_cell(row: u32, col: u32) {
+        let i = Self::get_index(row, col);
+        let idx = i / 8;
+        let bit = i % 8;
+
+        UNIV.cells[idx as usize] = UNIV.cells[idx as usize] & (u8::MAX - 2u8.pow(bit as u32));
+        UNIV.cells_tmp[idx as usize] = UNIV.cells[idx as usize] & (u8::MAX - 2u8.pow(bit as u32));
+    }
+
+    pub unsafe fn toggle_cell(row: u32, col: u32) {
+        let i = Self::get_index(row, col);
+        let idx = i / 8;
+        let bit = i % 8;
+        UNIV.cells[idx as usize] = match !((UNIV.cells[idx] & 2u8.pow(bit as u32)) > 0) {
+            true => UNIV.cells[idx as usize] | 2u8.pow(bit as u32),
+            false => UNIV.cells[idx as usize] & (u8::MAX - 2u8.pow(bit as u32)),
+        };
+        UNIV.cells_tmp = UNIV.cells.clone();
     }
     #[must_use]
-    pub fn cells(&self) -> *const usize {
-        self.cells.as_slice().as_ptr()
-    }
-
-    pub fn set_cell(&mut self, row: u32, col: u32) {
-        let idx = self.get_index(row, col);
-        self.cells.set(idx, true);
-    }
-
-    pub fn toggle_cell(&mut self, row: u32, col: u32) {
-        let idx = self.get_index(row, col);
-        self.cells.set(idx, !self.cells[idx]);
-    }
-    #[must_use]
-    pub fn get_cell(&self, row: u32, col: u32) -> bool {
-        let idx = self.get_index(row, col);
-        self.cells[idx]
+    pub unsafe fn get_cell(row: u32, col: u32) -> bool {
+        let i = Self::get_index(row, col);
+        let idx = i / 8;
+        let bit = i % 8;
+        UNIV.cells[idx] & 2u8.pow(bit as u32) > 0
     }
 }
 
 impl Universe {
-    const fn get_index(&self, row: u32, column: u32) -> usize {
-        (row * self.width + column) as usize
+    const unsafe fn get_index(row: u32, column: u32) -> usize {
+        (row * UNIV.width + column) as usize
     }
 
-    fn live_neighbor_count(&self, row: u32, column: u32) -> u8 {
-        let mut count = 0;
-        for delta_row in [self.height - 1, 0, 1].iter().copied() {
-            for delta_col in [self.width - 1, 0, 1].iter().copied() {
-                if delta_row == 0 && delta_col == 0 {
-                    continue;
-                }
+    unsafe fn set_tmp_cell(row: u32, col: u32) {
+        let i = Self::get_index(row, col);
+        let idx = i / 8;
+        let bit = i % 8;
 
-                let neighbor_row = (row + delta_row) % self.height;
-                let neighbor_col = (column + delta_col) % self.width;
-                let idx = self.get_index(neighbor_row, neighbor_col);
-                count += u8::from(self.cells[idx]);
-            }
-        }
+        // log!("{row},{col}=setting  {idx}*8+{bit}={i} ");
+        UNIV.cells_tmp[idx as usize] = UNIV.cells_tmp[idx as usize] | 2u8.pow(bit as u32);
+    }
+
+    unsafe fn unset_tmp_cell(row: u32, col: u32) {
+        let i = Self::get_index(row, col);
+        let idx = i / 8;
+        let bit = i % 8;
+
+        // log!("{row},{col}=unsetting  {idx}*8+{bit}={i} ");
+        UNIV.cells_tmp[idx as usize] =
+            UNIV.cells_tmp[idx as usize] & (u8::MAX - 2u8.pow(bit as u32));
+    }
+
+    unsafe fn live_neighbor_count(row: u32, column: u32) -> u8 {
+        let mut count = 0;
+
+        let north = if row == 0 { UNIV.height - 1 } else { row - 1 };
+
+        let south = if row == UNIV.height - 1 { 0 } else { row + 1 };
+
+        let west = if column == 0 {
+            UNIV.width - 1
+        } else {
+            column - 1
+        };
+
+        let east = if column == UNIV.width - 1 {
+            0
+        } else {
+            column + 1
+        };
+
+        let nw = Self::get_cell(north, west);
+        count += nw as u8;
+
+        let n = Self::get_cell(north, column);
+        count += n as u8;
+
+        let ne = Self::get_cell(north, east);
+        count += ne as u8;
+
+        let w = Self::get_cell(row, west);
+        count += w as u8;
+
+        let e = Self::get_cell(row, east);
+        count += e as u8;
+
+        let sw = Self::get_cell(south, west);
+        count += sw as u8;
+
+        let s = Self::get_cell(south, column);
+        count += s as u8;
+
+        let se = Self::get_cell(south, east);
+        count += se as u8;
+
         count
     }
 
-    fn reset(&mut self) {
-        let size = (self.width * self.height) as usize;
-        self.cells = FixedBitSet::with_capacity(size);
+    unsafe fn reset() {
+        UNIV.cells = [0; SIZE as usize / 8];
+        UNIV.cells_tmp = [0; SIZE as usize / 8];
     }
 }
